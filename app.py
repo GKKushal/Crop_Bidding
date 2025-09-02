@@ -1,5 +1,9 @@
 import streamlit as st
 import pandas as pd
+import database
+
+# Initialize database
+database.create_tables()
 
 # Custom CSS for styling
 st.markdown("""
@@ -65,27 +69,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state to store users, products, bids, and highest bid data
-if 'farmers' not in st.session_state:
-    st.session_state.farmers = {}  # farmer_id -> farmer details
-if 'buyers' not in st.session_state:
-    st.session_state.buyers = {}   # buyer_id -> buyer details
-if 'products' not in st.session_state:
-    st.session_state.products = {} # product_id -> product details
-if 'bids' not in st.session_state:
-    st.session_state.bids = {}     # product_id -> list of bids {buyer_id, bid_amount}
-if 'highest_bids' not in st.session_state:
-    st.session_state.highest_bids = {}  # product_id -> highest bid {buyer_id, bid_amount}
+# Initialize session state for login status only
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'user_type' not in st.session_state:
     st.session_state.user_type = None
 if 'user_id' not in st.session_state:
     st.session_state.user_id = None
-if 'users' not in st.session_state:
-    st.session_state.users = {}  # username -> {'password': pwd, 'type': 'farmer' or 'buyer', 'id': id}
-if 'feedback' not in st.session_state:
-    st.session_state.feedback = []  # list of {'user_type': , 'user_name': , 'feedback': }
+if 'username' not in st.session_state:
+    st.session_state.username = None
 
 # Main Header with Crop Images
 st.markdown("""
@@ -110,13 +102,13 @@ def login():
         password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
 
         if st.button("🚀 Login", use_container_width=True):
-            user = st.session_state.users.get(username)
-            if user and user['password'] == password:
+            user = database.get_user_by_username(username)
+            if user and user[2] == password:  # user[2] is password
                 st.session_state.logged_in = True
-                st.session_state.user_type = user['type']
-                st.session_state.user_id = user['id']
+                st.session_state.user_type = user[3]  # user[3] is user_type
+                st.session_state.user_id = user[0]    # user[0] is user_id
                 st.session_state.username = username
-                st.markdown(f'<div class="success-message">🎉 Welcome back, {username}! Ready to {user["type"]}?</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="success-message">🎉 Welcome back, {username}! Ready to {user[3]}?</div>', unsafe_allow_html=True)
                 st.rerun()
             else:
                 st.markdown('<div class="error-message">❌ Invalid username or password. Please try again.</div>', unsafe_allow_html=True)
@@ -142,16 +134,12 @@ def signup():
         if st.button("🎉 Create Account", use_container_width=True):
             if not all([user_id, username, password, phone_number]):
                 st.markdown('<div class="error-message">❌ Please fill in all fields!</div>', unsafe_allow_html=True)
-            elif username in st.session_state.users:
-                st.markdown('<div class="error-message">❌ Username already exists! Please choose a different one.</div>', unsafe_allow_html=True)
             else:
-                st.session_state.users[username] = {'password': password, 'type': user_type.lower(), 'id': user_id, 'phone': phone_number}
-                if user_type == "Farmer":
-                    st.session_state.farmers[user_id] = {'username': username, 'phone': phone_number}
-                    st.markdown(f'<div class="success-message">🎉 Welcome Farmer {username}! Start listing your fresh produce for bidding.</div>', unsafe_allow_html=True)
+                success = database.add_user(user_id, username, password, user_type.lower(), phone_number)
+                if success:
+                    st.markdown(f'<div class="success-message">🎉 Welcome {user_type} {username}! Start your journey in the fresh produce marketplace.</div>', unsafe_allow_html=True)
                 else:
-                    st.session_state.buyers[user_id] = {'username': username, 'phone': phone_number}
-                    st.markdown(f'<div class="success-message">🎉 Welcome Buyer {username}! Start bidding on fresh produce from local farmers.</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="error-message">❌ Username already exists! Please choose a different one.</div>', unsafe_allow_html=True)
 
     with col2:
         st.markdown("### 🌱 Why Join Us?")
@@ -229,25 +217,18 @@ def list_product():
     uploaded_file = st.file_uploader("Or Upload Custom Product Image", type=["jpg", "png", "jpeg"])
 
     if st.button("🚀 List Product"):
-        if product_id in st.session_state.products:
-            st.markdown('<div class="error-message">❌ Product ID already exists!</div>', unsafe_allow_html=True)
-        else:
-            image = crop_options[selected_crop]  # Default to selected crop image
-            if uploaded_file is not None:
-                image = uploaded_file
-            st.session_state.products[product_id] = {
-                'farmer_id': farmer_id,
-                'product_name': product_name,
-                'quantity_kg': quantity_kg,
-                'base_price': base_price,
-                'image': image
-            }
+        image_url = crop_options[selected_crop]  # Default to selected crop image URL
+        if uploaded_file is not None:
+            # For now, we'll store the uploaded file name as a placeholder
+            # In a real app, you'd save the file and store the path
+            image_url = uploaded_file.name
+        success = database.add_product(product_id, farmer_id, product_name, quantity_kg, base_price, image_url)
+        if success:
             st.markdown('<div class="success-message">✅ Product listed successfully! Fresh produce is now available for bidding.</div>', unsafe_allow_html=True)
             st.markdown("### 🔔 Notifying Buyers")
-            if st.session_state.buyers:
-                st.write(f"📢 Buyers Notified: {', '.join(st.session_state.buyers.values())}")
-            else:
-                st.write("📢 No buyers registered yet. Product will be visible when buyers sign up!")
+            st.write("📢 Product is now live for bidding!")
+        else:
+            st.markdown('<div class="error-message">❌ Product ID already exists!</div>', unsafe_allow_html=True)
 
 def place_bid():
     st.markdown("""
@@ -257,7 +238,8 @@ def place_bid():
     </div>
     """, unsafe_allow_html=True)
 
-    if not st.session_state.products:
+    products = database.get_all_products()
+    if not products:
         st.markdown("""
         <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 10px;">
             <h4>🥕 No Products Available Yet</h4>
@@ -268,21 +250,47 @@ def place_bid():
 
     buyer_id = st.session_state.user_id
     product_options = []
-    for pid, pdata in st.session_state.products.items():
-        product_options.append(f"{pid} - {pdata['product_name']}")
+    products_dict = {}
+    for product in products:
+        pid, fid, pname, qty, price, img = product
+        product_options.append(f"{pid} - {pname}")
+        products_dict[pid] = {
+            'farmer_id': fid,
+            'product_name': pname,
+            'quantity_kg': qty,
+            'base_price': price,
+            'image': img
+        }
 
     product_choice = st.selectbox("🌽 Select Fresh Produce", options=product_options)
 
     if product_choice:
         product_id = product_choice.split(" - ")[0]
-        product = st.session_state.products[product_id]
+        product = products_dict[product_id]
 
         col1, col2 = st.columns([1, 2])
         with col1:
             if product['image']:
                 st.image(product['image'], caption=f"🍅 {product['product_name']}", width=200)
         with col2:
-            farmer_info = st.session_state.farmers.get(product['farmer_id'], {'username': 'Unknown', 'phone': 'N/A'})
+            farmer_user = database.get_user_by_id(product['farmer_id'])
+            farmer_name = farmer_user[1] if farmer_user else 'Unknown'
+            farmer_phone = farmer_user[4] if farmer_user else 'N/A'
+
+            # Get existing bids for this product
+            existing_bids = database.get_all_bids()
+            product_bids = [bid for bid in existing_bids if bid[0] == product_id]
+
+            bid_info = ""
+            if product_bids:
+                highest_bid = max(product_bids, key=lambda x: x[3])
+                bid_info = f"""
+                <p><strong>Current Highest Bid:</strong> ₹{highest_bid[3]} by {highest_bid[2]}</p>
+                <p><strong>Total Bids:</strong> {len(product_bids)}</p>
+                """
+            else:
+                bid_info = "<p><strong>Status:</strong> No bids yet - Be the first!</p>"
+
             st.markdown(f"""
             <div class="product-card">
                 <h4>📦 Product Details</h4>
@@ -290,8 +298,9 @@ def place_bid():
                 <p><strong>Name:</strong> {product['product_name']}</p>
                 <p><strong>Quantity:</strong> {product['quantity_kg']} kg</p>
                 <p><strong>Starting Price:</strong> ₹{product['base_price']}</p>
-                <p><strong>Farmer:</strong> {farmer_info.get('username', 'Unknown')}</p>
-                <p><strong>Phone:</strong> {farmer_info.get('phone', 'N/A')}</p>
+                <p><strong>Farmer:</strong> {farmer_name}</p>
+                <p><strong>Phone:</strong> {farmer_phone}</p>
+                {bid_info}
             </div>
             """, unsafe_allow_html=True)
 
@@ -303,22 +312,23 @@ def place_bid():
             return
 
         product_id = product_choice.split(" - ")[0]
-        base_price = st.session_state.products[product_id]['base_price']
+        base_price = products_dict[product_id]['base_price']
 
         if bid_amount <= 0:
             st.markdown('<div class="error-message">❌ Please enter a valid bid amount!</div>', unsafe_allow_html=True)
         elif bid_amount < base_price:
             st.markdown(f'<div class="error-message">❌ Bid must be at least the starting price: ₹{base_price}</div>', unsafe_allow_html=True)
         else:
-            st.session_state.bids.setdefault(product_id, [])
-            st.session_state.bids[product_id].append({'buyer_id': buyer_id, 'bid_amount': bid_amount})
-
-            highest = st.session_state.highest_bids.get(product_id)
-            if highest is None or bid_amount > highest['bid_amount']:
-                st.session_state.highest_bids[product_id] = {'buyer_id': buyer_id, 'bid_amount': bid_amount}
-                st.markdown(f'<div class="success-message">🎉 Congratulations! You are now the highest bidder with ₹{bid_amount}</div>', unsafe_allow_html=True)
+            success = database.add_bid(product_id, buyer_id, bid_amount)
+            if success:
+                highest_bids = database.get_highest_bids()
+                highest = highest_bids.get(product_id)
+                if highest is None or bid_amount > highest['bid_amount']:
+                    st.markdown(f'<div class="success-message">🎉 Congratulations! You are now the highest bidder with ₹{bid_amount}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="success-message">✅ Bid placed successfully! Current highest bid: ₹{highest["bid_amount"]}</div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div class="success-message">✅ Bid placed successfully! Current highest bid: ₹{highest["bid_amount"]}</div>', unsafe_allow_html=True)
+                st.markdown('<div class="error-message">❌ Error placing bid. Please try again.</div>', unsafe_allow_html=True)
 
 def show_highest_bids():
     st.markdown("""
@@ -328,7 +338,11 @@ def show_highest_bids():
     </div>
     """, unsafe_allow_html=True)
 
-    if not st.session_state.highest_bids:
+    highest_bids = database.get_highest_bids()
+    products = database.get_all_products()
+    products_dict = {p[0]: {'farmer_id': p[1], 'product_name': p[2], 'quantity_kg': p[3], 'base_price': p[4], 'image': p[5]} for p in products}
+
+    if not highest_bids:
         st.markdown("""
         <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 10px;">
             <h4>📊 No Bids Yet</h4>
@@ -337,9 +351,12 @@ def show_highest_bids():
         """, unsafe_allow_html=True)
         return
 
-    for pid, bid_info in st.session_state.highest_bids.items():
-        product = st.session_state.products[pid]
-        buyer_name = st.session_state.buyers[bid_info['buyer_id']]
+    for pid, bid_info in highest_bids.items():
+        product = products_dict[pid]
+        buyer_user = database.get_user_by_username(bid_info['buyer_id'])
+        buyer_name = buyer_user[1] if buyer_user else bid_info['buyer_id']
+        farmer_user = database.get_user_by_id(product['farmer_id'])
+        farmer_name = farmer_user[1] if farmer_user else product['farmer_id']
 
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -353,20 +370,26 @@ def show_highest_bids():
                 <p><strong>Quantity:</strong> {product['quantity_kg']} kg</p>
                 <p><strong>🏅 Highest Bidder:</strong> {buyer_name}</p>
                 <p><strong>💰 Winning Bid:</strong> ₹{bid_info['bid_amount']}</p>
-                <p><strong>Farmer:</strong> {st.session_state.farmers.get(product['farmer_id'], 'Unknown')}</p>
+                <p><strong>Farmer:</strong> {farmer_name}</p>
             </div>
             """, unsafe_allow_html=True)
         st.markdown("---")
 
 def notify_farmer():
     st.subheader("Notify Farmer about Final Sale")
-    if not st.session_state.highest_bids:
+    highest_bids = database.get_highest_bids()
+    products = database.get_all_products()
+    products_dict = {p[0]: {'farmer_id': p[1], 'product_name': p[2], 'quantity_kg': p[3], 'base_price': p[4], 'image': p[5]} for p in products}
+
+    if not highest_bids:
         st.write("No sales yet.")
         return
-    for pid, bid_info in st.session_state.highest_bids.items():
-        product = st.session_state.products[pid]
-        farmer_name = st.session_state.farmers[product['farmer_id']]
-        buyer_name = st.session_state.buyers[bid_info['buyer_id']]
+    for pid, bid_info in highest_bids.items():
+        product = products_dict[pid]
+        farmer_user = database.get_user_by_id(product['farmer_id'])
+        farmer_name = farmer_user[1] if farmer_user else product['farmer_id']
+        buyer_user = database.get_user_by_username(bid_info['buyer_id'])
+        buyer_name = buyer_user[1] if buyer_user else bid_info['buyer_id']
         st.write(f"Product '{product['product_name']}' sold to {buyer_name} for {bid_info['bid_amount']} (Farmer: {farmer_name})")
 
 def user_feedback():
@@ -374,76 +397,95 @@ def user_feedback():
     user_name = st.text_input("Enter your name")
     feedback = st.text_area("Your feedback")
     if st.button("Submit Feedback"):
-        st.session_state.feedback.append({
-            'user_type': st.session_state.user_type,
-            'user_name': user_name,
-            'feedback': feedback
-        })
-        st.success("Thank you for your feedback!")
+        success = database.add_feedback(st.session_state.user_id, feedback)
+        if success:
+            st.success("Thank you for your feedback!")
+        else:
+            st.error("Failed to submit feedback. Please try again.")
 
 def view_feedback():
     st.subheader("All Feedback")
-    if not st.session_state.feedback:
+    feedbacks = database.get_all_feedback()
+    if not feedbacks:
         st.write("No feedback yet.")
     else:
-        for fb in st.session_state.feedback:
-            st.write(f"**Type:** {fb['user_type']}")
-            st.write(f"**Name:** {fb['user_name']}")
-            st.write(f"**Feedback:** {fb['feedback']}")
+        for fb in feedbacks:
+            st.write(f"**Type:** {fb[2]}")  # user_type
+            st.write(f"**Name:** {fb[1]}")  # username
+            st.write(f"**Feedback:** {fb[3]}")  # feedback_text
             st.write("---")
 
 def view_bidding_details():
     st.subheader("All Bidding Details")
-    if not st.session_state.bids:
+    bids = database.get_all_bids()
+    if not bids:
         st.write("No bids yet.")
     else:
-        for pid, bids in st.session_state.bids.items():
-            st.write(f"**Product ID:** {pid}")
-            for bid in bids:
-                buyer_name = st.session_state.buyers[bid['buyer_id']]
-                st.write(f"Bidder: {buyer_name}, Amount: {bid['bid_amount']}")
-            st.write("---")
+        current_product = None
+        for bid in bids:
+            pid, pname, buyer_name, amount, bid_time = bid
+            if current_product != pid:
+                if current_product is not None:
+                    st.write("---")
+                st.write(f"**Product:** {pname} (ID: {pid})")
+                current_product = pid
+            st.write(f"Bidder: {buyer_name}, Amount: ₹{amount}, Time: {bid_time}")
+        st.write("---")
 
 def manage_farmers():
     st.subheader("Manage Farmers")
-    for fid, fname in list(st.session_state.farmers.items()):
+    farmers = database.get_all_farmers()
+    for farmer in farmers:
+        fid, fname, phone = farmer
         col1, col2 = st.columns([3,1])
         with col1:
-            st.write(f"ID: {fid}, Name: {fname}")
+            st.write(f"ID: {fid}, Name: {fname}, Phone: {phone}")
         with col2:
             if st.button(f"Delete {fid}", key=f"del_farmer_{fid}"):
-                del st.session_state.farmers[fid]
-                if fname in st.session_state.users:
-                    del st.session_state.users[fname]
-                st.success(f"Farmer {fname} deleted")
-                st.rerun()
+                success = database.delete_user(fid)
+                if success:
+                    st.success(f"Farmer {fname} deleted")
+                    st.rerun()
+                else:
+                    st.error("Failed to delete farmer")
 
 def manage_buyers():
     st.subheader("Manage Buyers")
-    for bid, bname in list(st.session_state.buyers.items()):
+    buyers = database.get_all_buyers()
+    for buyer in buyers:
+        bid, bname, phone = buyer
         col1, col2 = st.columns([3,1])
         with col1:
-            st.write(f"ID: {bid}, Name: {bname}")
+            st.write(f"ID: {bid}, Name: {bname}, Phone: {phone}")
         with col2:
             if st.button(f"Delete {bid}", key=f"del_buyer_{bid}"):
-                del st.session_state.buyers[bid]
-                if bname in st.session_state.users:
-                    del st.session_state.users[bname]
-                st.success(f"Buyer {bname} deleted")
-                st.rerun()
+                success = database.delete_user(bid)
+                if success:
+                    st.success(f"Buyer {bname} deleted")
+                    st.rerun()
+                else:
+                    st.error("Failed to delete buyer")
 
 def delete_data():
     st.subheader("Delete Data")
     if st.button("Delete All Feedback"):
-        st.session_state.feedback = []
-        st.success("All feedback deleted")
+        success = database.delete_all_feedback()
+        if success:
+            st.success("All feedback deleted")
+        else:
+            st.error("Failed to delete feedback")
     if st.button("Delete All Bids"):
-        st.session_state.bids = {}
-        st.session_state.highest_bids = {}
-        st.success("All bids deleted")
+        success = database.delete_all_bids()
+        if success:
+            st.success("All bids deleted")
+        else:
+            st.error("Failed to delete bids")
     if st.button("Delete All Products"):
-        st.session_state.products = {}
-        st.success("All products deleted")
+        success = database.delete_all_products()
+        if success:
+            st.success("All products deleted")
+        else:
+            st.error("Failed to delete products")
 
 menu_logged_out = ["Login", "Sign Up", "Admin Login"]
 menu_logged_in_farmer = ["List Product", "Notify Farmer", "Logout"]
