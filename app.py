@@ -110,24 +110,16 @@ def login():
         password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
 
         if st.button("🚀 Login", use_container_width=True):
-            if username == "admin" and password == "admin123":
+            user = st.session_state.users.get(username)
+            if user and user['password'] == password:
                 st.session_state.logged_in = True
-                st.session_state.user_type = "admin"
-                st.session_state.user_id = "admin"
-                st.session_state.username = "admin"
-                st.markdown('<div class="success-message">🎉 Welcome Admin! You have full access to manage the system.</div>', unsafe_allow_html=True)
+                st.session_state.user_type = user['type']
+                st.session_state.user_id = user['id']
+                st.session_state.username = username
+                st.markdown(f'<div class="success-message">🎉 Welcome back, {username}! Ready to {user["type"]}?</div>', unsafe_allow_html=True)
                 st.rerun()
             else:
-                user = st.session_state.users.get(username)
-                if user and user['password'] == password:
-                    st.session_state.logged_in = True
-                    st.session_state.user_type = user['type']
-                    st.session_state.user_id = user['id']
-                    st.session_state.username = username
-                    st.markdown(f'<div class="success-message">🎉 Welcome back, {username}! Ready to {user["type"]}?</div>', unsafe_allow_html=True)
-                    st.rerun()
-                else:
-                    st.markdown('<div class="error-message">❌ Invalid username or password. Please try again.</div>', unsafe_allow_html=True)
+                st.markdown('<div class="error-message">❌ Invalid username or password. Please try again.</div>', unsafe_allow_html=True)
 
 
 
@@ -143,21 +135,22 @@ def signup():
     with col1:
         user_type = st.selectbox("🌾 I am a", ("Farmer", "Buyer"), help="Select your role in the marketplace")
         user_id = st.text_input("🆔 Enter your ID", placeholder="Unique identifier")
+        phone_number = st.text_input("📞 Phone Number", placeholder="Enter your phone number")
         username = st.text_input("👤 Choose a username", placeholder="Your display name")
         password = st.text_input("🔐 Choose a password", type="password", placeholder="Secure password")
 
         if st.button("🎉 Create Account", use_container_width=True):
-            if not all([user_id, username, password]):
+            if not all([user_id, username, password, phone_number]):
                 st.markdown('<div class="error-message">❌ Please fill in all fields!</div>', unsafe_allow_html=True)
             elif username in st.session_state.users:
                 st.markdown('<div class="error-message">❌ Username already exists! Please choose a different one.</div>', unsafe_allow_html=True)
             else:
-                st.session_state.users[username] = {'password': password, 'type': user_type.lower(), 'id': user_id}
+                st.session_state.users[username] = {'password': password, 'type': user_type.lower(), 'id': user_id, 'phone': phone_number}
                 if user_type == "Farmer":
-                    st.session_state.farmers[user_id] = username
+                    st.session_state.farmers[user_id] = {'username': username, 'phone': phone_number}
                     st.markdown(f'<div class="success-message">🎉 Welcome Farmer {username}! Start listing your fresh produce for bidding.</div>', unsafe_allow_html=True)
                 else:
-                    st.session_state.buyers[user_id] = username
+                    st.session_state.buyers[user_id] = {'username': username, 'phone': phone_number}
                     st.markdown(f'<div class="success-message">🎉 Welcome Buyer {username}! Start bidding on fresh produce from local farmers.</div>', unsafe_allow_html=True)
 
     with col2:
@@ -178,6 +171,37 @@ def logout():
     st.session_state.user_type = None
     st.session_state.user_id = None
     st.success("Logged out successfully")
+
+def admin_login():
+    st.markdown("""
+    <div style="background-color: #e3f2fd; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <h3 style="color: #1565c0; margin-bottom: 15px;">🔐 Admin Login</h3>
+        <p style="color: #1565c0;">Access the admin panel to manage the system.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        username = st.text_input("👤 Admin Username", placeholder="Enter admin username")
+        password = st.text_input("🔒 Admin Password", type="password", placeholder="Enter admin password")
+
+        if st.button("🚀 Admin Login", use_container_width=True):
+            if username == "admin" and password == "admin123":
+                st.session_state.logged_in = True
+                st.session_state.user_type = "admin"
+                st.session_state.user_id = "admin"
+                st.session_state.username = "admin"
+                st.markdown('<div class="success-message">🎉 Welcome Admin! You have full access to manage the system.</div>', unsafe_allow_html=True)
+                st.rerun()
+            else:
+                st.markdown('<div class="error-message">❌ Invalid admin credentials. Please try again.</div>', unsafe_allow_html=True)
+
+    with col2:
+        st.markdown("### 🔧 Admin Features")
+        st.markdown("✅ **Manage Users:** View and delete farmers/buyers")
+        st.markdown("✅ **View Feedback:** See all user feedback")
+        st.markdown("✅ **Bidding Details:** Monitor all bids")
+        st.markdown("✅ **Data Management:** Delete data as needed")
 
 def list_product():
     st.markdown("""
@@ -258,6 +282,7 @@ def place_bid():
             if product['image']:
                 st.image(product['image'], caption=f"🍅 {product['product_name']}", width=200)
         with col2:
+            farmer_info = st.session_state.farmers.get(product['farmer_id'], {'username': 'Unknown', 'phone': 'N/A'})
             st.markdown(f"""
             <div class="product-card">
                 <h4>📦 Product Details</h4>
@@ -265,7 +290,8 @@ def place_bid():
                 <p><strong>Name:</strong> {product['product_name']}</p>
                 <p><strong>Quantity:</strong> {product['quantity_kg']} kg</p>
                 <p><strong>Starting Price:</strong> ₹{product['base_price']}</p>
-                <p><strong>Farmer:</strong> {st.session_state.farmers.get(product['farmer_id'], 'Unknown')}</p>
+                <p><strong>Farmer:</strong> {farmer_info.get('username', 'Unknown')}</p>
+                <p><strong>Phone:</strong> {farmer_info.get('phone', 'N/A')}</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -419,7 +445,7 @@ def delete_data():
         st.session_state.products = {}
         st.success("All products deleted")
 
-menu_logged_out = ["Login", "Sign Up"]
+menu_logged_out = ["Login", "Sign Up", "Admin Login"]
 menu_logged_in_farmer = ["List Product", "Notify Farmer", "Logout"]
 menu_logged_in_buyer = ["Place Bid", "View Highest Bids", "User Feedback", "Logout"]
 menu_logged_in_admin = ["View Feedback", "View Bidding Details", "Manage Farmers", "Manage Buyers", "Delete Data", "Logout"]
@@ -430,6 +456,8 @@ if not st.session_state.logged_in:
         login()
     elif choice == "Sign Up":
         signup()
+    elif choice == "Admin Login":
+        admin_login()
 else:
     st.sidebar.write(f"Logged in as: {st.session_state.username} ({st.session_state.user_type.capitalize()})")
     if st.session_state.user_type == "farmer":
